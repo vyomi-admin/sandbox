@@ -31,6 +31,7 @@ services:
       - "host.docker.internal:host-gateway"
     depends_on:
       - vyomi-sql-postgres
+      - cloudsim
     environment:
       CLOUDLEARN_STATE_FILE: /data/cloudlearn_state.sqlite3
       CLOUDLEARN_LICENSE_BACKEND_URL: ${VYOMI_LICENSE_BACKEND_URL:-https://vyomi.cloud}
@@ -52,6 +53,7 @@ services:
       CLOUDLEARN_VAULT_URL: http://vyomi-vault:8200
       CLOUDLEARN_VAULT_TOKEN: vyomi-dev-token
       CLOUDLEARN_NATS_URL: nats://vyomi-nats:4222
+      CLOUDLEARN_CLOUDSIM_URL: http://cloudsim:9010    # compute backbone (CloudSim Plus) — always on
       # ── AWS backends ──
       CLOUDLEARN_MINIO_URL: http://vyomi-minio:9000
       CLOUDLEARN_MINIO_ACCESS_KEY: cloudlearn
@@ -104,10 +106,25 @@ services:
     networks: [vyomi-net]
     restart: unless-stopped
 
+  cloudsim:                      # CloudSim Plus — the compute backbone (EC2/GCE/VM sim).
+    # Always-on core: pull-only (no build context in the sandbox); mirrors the
+    # main appliance compose. Published image, so no MinIO-style 404.
+    image: ${VYOMI_CLOUDSIM_IMAGE:-vyomi/cloudsim:latest}
+    networks: [vyomi-net]
+    environment:
+      CLOUDLEARN_CLOUDSIM_HOST: 0.0.0.0
+      CLOUDLEARN_CLOUDSIM_PORT: "9010"
+      CLOUDLEARN_CLOUDSIM_STATE_FILE: /data/cloudsim_state.json
+    volumes:
+      - cloudsim-data:/data
+    restart: unless-stopped
+
   # ── AWS backends (profile: aws) ───────────────────────────────────────────
   vyomi-minio:
     profiles: ["aws"]
-    image: minio/minio:latest
+    # MinIO removed the public Docker Hub image (docker.io/minio/minio → 404);
+    # their official registry is now quay.io. Overridable via VYOMI_MINIO_IMAGE.
+    image: ${VYOMI_MINIO_IMAGE:-quay.io/minio/minio:latest}
     networks: [vyomi-net]
     command: ["server", "/data"]
     environment:
@@ -179,3 +196,4 @@ volumes:
   vyomi-sql-mysql:
   vyomi-minio:
   vyomi-gcs:
+  cloudsim-data:
