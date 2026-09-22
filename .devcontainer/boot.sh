@@ -48,9 +48,23 @@ ttl_seconds() {  # 8h | 90m | 1d | 1w → seconds
   esac
 }
 
+make_port_public() {
+  # Land developers on the CONSOLE without a GitHub auth wall: mark the forwarded
+  # port 9000 public. Best-effort (needs gh + a codespace token that allows it;
+  # org policy may forbid public ports — then set it in the Ports tab).
+  if command -v gh >/dev/null 2>&1 && [ -n "${CODESPACE_NAME:-}" ]; then
+    if gh codespace ports visibility 9000:public -c "$CODESPACE_NAME" >/dev/null 2>&1; then
+      log "console port 9000 → public."
+    else
+      log "note: couldn't set port 9000 public — set it in the Ports tab if the console asks to authorize."
+    fi
+  fi
+}
+
 start_stack() {
   log "pulling + starting stack (profile=$PROFILE · clouds=$COMPOSE_PROFILES)…"
   docker compose -f "$COMPOSE" up -d
+  make_port_public
   log "waiting for the simulator (http://localhost:9000/healthz)…"
   for i in $(seq 1 60); do
     if curl -fsS -m 3 http://localhost:9000/healthz >/dev/null 2>&1; then
