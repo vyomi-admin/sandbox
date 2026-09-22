@@ -61,8 +61,18 @@ make_port_public() {
   fi
 }
 
+install_clis() {
+  # Pre-install the native SDK/CLIs so developers don't hit "aws: command not
+  # found" — in the BACKGROUND so it never slows provisioning or the appliance
+  # boot. Best-effort (pip first, apt fallback).
+  ( python3 -m pip install --quiet boto3 awscli >/dev/null 2>&1 \
+      || (sudo apt-get update -qq && sudo apt-get install -y -qq awscli python3-boto3) >/dev/null 2>&1 \
+      || true ) &
+}
+
 start_stack() {
   log "pulling + starting stack (profile=$PROFILE · clouds=$COMPOSE_PROFILES)…"
+  install_clis
   docker compose -f "$COMPOSE" up -d
   make_port_public
   log "waiting for the simulator (http://localhost:9000/healthz)…"
