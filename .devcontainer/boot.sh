@@ -36,6 +36,13 @@ post() {  # post <path> <json>   (fail-soft)
   curl -fsS -m 10 -X POST "$PORTAL$1" -H 'Content-Type: application/json' -d "$2" >/dev/null 2>&1 || true
 }
 
+# Optional per-sandbox secret for the readiness webhook (portal verifies it iff
+# VYOMI_SANDBOX_STATUS_SECRET is configured there too). Empty is fine otherwise.
+STATUS_TOKEN="${VYOMI_SANDBOX_STATUS_SECRET:-}"
+post_status() {  # post_status <status> <pct>   → the PRIMARY launch-readiness webhook
+  post /api/sandbox/status "{\"codespace_id\":\"$CODESPACE\",\"status\":\"$1\",\"pct\":$2,\"token\":\"$STATUS_TOKEN\"}"
+}
+
 ttl_seconds() {  # 8h | 90m | 1d | 1w → seconds
   local t="$1" n unit
   n="${t%[hmdw]}"; unit="${t##*[0-9]}"
@@ -53,10 +60,13 @@ make_port_public() {
   # port 9000 public. Best-effort (needs gh + a codespace token that allows it;
   # org policy may forbid public ports — then set it in the Ports tab).
   if command -v gh >/dev/null 2>&1 && [ -n "${CODESPACE_NAME:-}" ]; then
-    if gh codespace ports visibility 9000:public -c "$CODESPACE_NAME" >/dev/null 2>&1; then
-      log "console port 9000 → public."
+    # ORG visibility (NOT public) — SOC/InfoSec: the console must not be an
+    # anonymous internet-reachable endpoint. Only authenticated org members reach it.
+    # (The portal is the primary authority on visibility; this is a best-effort echo.)
+    if gh codespace ports visibility 9000:org -c "$CODESPACE_NAME" >/dev/null 2>&1; then
+      log "console port 9000 → org-visible."
     else
-      log "note: couldn't set port 9000 public — set it in the Ports tab if the console asks to authorize."
+      log "note: couldn't set port 9000 org-visible — the portal will set it, or use the Ports tab."
     fi
   fi
 }
@@ -79,11 +89,13 @@ start_stack() {
   for i in $(seq 1 60); do
     if curl -fsS -m 3 http://localhost:9000/healthz >/dev/null 2>&1; then
       log "simulator is up."
+      post_status ready 100          # PRIMARY readiness webhook → the launch modal opens off this
       if [ -n "${CLOUDLEARN_PUBLIC_URL:-}" ]; then
         log "console → ${CLOUDLEARN_PUBLIC_URL}"
       fi
       return 0
     fi
+    post_status booting $(( i * 100 / 60 ))   # progress webhook (best-effort)
     sleep 3
   done
   log "WARNING: simulator did not report healthy in time (continuing)."
